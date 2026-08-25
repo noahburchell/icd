@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <limits.h>
+#include <linux/limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,24 +164,21 @@ static const char *key_name(int k) {
 // placeholder
 static void draw(int last) {
         const char *name = key_name(last);
-        char buf[160];
+        char buf[PATH_MAX]; //this needs to fit dirs AND max path! 
         int n;
 
-        if (name)
-                n = snprintf(buf, sizeof buf,
-                             CLEAR "icd: key=%s\r\nq or esc to quit\r\n", name);
-        else if (last >= 0x20 && last < 0x7F)
-                n = snprintf(buf, sizeof buf,
-                             CLEAR "icd: key='%c'\r\nq or esc to quit\r\n", last);
-        else
-                n = snprintf(buf, sizeof buf,
-                             CLEAR "icd: key=0x%02x\r\nq or esc to quit\r\n", last);
+        n = snprintf(buf, sizeof buf,
+                CLEAR "icd: key=0x%02x\r\nq or esc to quit\r\n", last);
+        
+        // somehow display the dirs in cwd, maybe getting cwd should be here? doesnt sit right
 
         if (n > 0)
                 emit(buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);
 }
 
 int main(void) {
+        int status = 0;
+
         if (!isatty(STDOUT_FILENO)) {
                 fprintf(stderr, "icd: stdout is not a terminal\n");
                 return 1;
@@ -206,6 +204,13 @@ int main(void) {
         int last = KEY_NONE;
 
         while (running) {
+                char cwd[PATH_MAX];
+                if (getcwd(cwd, sizeof(cwd)) == NULL) {
+                        perror("getcwd() error");
+                        status = 1;
+                        break;
+                }
+
                 draw(last);
 
                 int k = key_read();
@@ -234,10 +239,11 @@ int main(void) {
                         /* TODO: go into the selected dir */
                         break;
                 case KEY_NONE:
-                        break;                  // resize or resume: just redraw
+                        break;
                 }
 
                 last = k;
+
         }
 
         term_restore();
@@ -247,5 +253,5 @@ int main(void) {
                 raise((int)caught);
         }
 
-        return 0;
+        return status;
 }
