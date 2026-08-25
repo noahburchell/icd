@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <termios.h>
 #include <unistd.h>
 #include <poll.h>
@@ -161,16 +162,14 @@ static const char *key_name(int k) {
         }
 }
 
-// placeholder
-static void draw(int last) {
-        const char *name = key_name(last);
-        char buf[PATH_MAX]; //this needs to fit dirs AND max path! 
+static void draw(DIR *dir) {
+        char buf[PATH_MAX];
         int n;
 
         n = snprintf(buf, sizeof buf,
-                CLEAR "icd: key=0x%02x\r\nq or esc to quit\r\n", last);
+                CLEAR "\n");
         
-        // somehow display the dirs in cwd, maybe getting cwd should be here? doesnt sit right
+        // dir! brilliant
 
         if (n > 0)
                 emit(buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);
@@ -204,14 +203,15 @@ int main(void) {
         int last = KEY_NONE;
 
         while (running) {
-                char cwd[PATH_MAX];
-                if (getcwd(cwd, sizeof(cwd)) == NULL) {
-                        perror("getcwd() error");
+                DIR *dir;
+                dir = opendir(".");
+                if (dir == NULL) {
+                        perror("icd: unable to open directory");
                         status = 1;
                         break;
                 }
 
-                draw(last);
+                draw(dir);
 
                 int k = key_read();
                 if (!running)
