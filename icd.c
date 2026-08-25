@@ -163,16 +163,28 @@ static const char *key_name(int k) {
 }
 
 static void draw(DIR *dir) {
+        struct dirent *entry;
         char buf[PATH_MAX];
+        size_t offset;
         int n;
 
-        n = snprintf(buf, sizeof buf,
-                CLEAR "\n");
-        
+        n = snprintf(buf, sizeof buf, CLEAR);
+        offset = (size_t)n;
+
+        while ((entry = readdir(dir)) != NULL) {
+                if (entry->d_type != DT_DIR)
+                        continue;
+
+                n = snprintf(buf + offset, sizeof buf - offset,
+                        "%s\n", entry->d_name);
+                if (n < 0 || (size_t)n >= sizeof buf - offset)
+                        break; // out of room
+                offset += (size_t)n;
+        }
+
         // dir! brilliant
 
-        if (n > 0)
-                emit(buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);
+        emit(buf, offset);
 }
 
 int main(void) {
@@ -202,9 +214,14 @@ int main(void) {
 
         int last = KEY_NONE;
 
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
+                running = 0;
+                status = 1;
+        }
+
         while (running) {
-                DIR *dir;
-                dir = opendir(".");
+                DIR *dir = opendir(cwd);
                 if (dir == NULL) {
                         perror("icd: unable to open directory");
                         status = 1;
@@ -212,6 +229,7 @@ int main(void) {
                 }
 
                 draw(dir);
+                closedir(dir);
 
                 int k = key_read();
                 if (!running)
