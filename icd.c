@@ -23,6 +23,8 @@ static size_t inlen, inpos;
 
 #define ALT_ON    "\033[?1049h"
 #define ALT_OFF   "\033[?1049l"
+#define CURS_OFF  "\033[?25l"
+#define CURS_ON   "\033[?25h"
 #define CLEAR     "\033[2J\033[H"
 
 #define EMIT(s) emit(s, sizeof (s) - 1)
@@ -111,12 +113,12 @@ static int term_setup(void) {
                 raw.c_cc[VTIME] = 0;
                 term_saved = tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0;
         }
-        EMIT(ALT_ON);
+        EMIT(ALT_ON CURS_OFF);
         return term_saved;
 }
 
 static void term_restore(void) {
-        EMIT(ALT_OFF);
+        EMIT(ALT_OFF CURS_ON);
         if (term_saved)
                 tcsetattr(STDIN_FILENO, TCSANOW, &saved_term);
 }
@@ -162,29 +164,85 @@ static const char *key_name(int k) {
         }
 }
 
-static void draw(DIR *dir) {
-        struct dirent *entry;
-        char buf[PATH_MAX];
-        size_t offset;
-        int n;
+struct listing {
+        char   **names;
+        size_t   count;
+};
 
-        n = snprintf(buf, sizeof buf, CLEAR);
-        offset = (size_t)n;
+static int cmp_name(const void *a, const void *b) {
+        return strcmp(*(const char * const *)a, *(const char * const *)b);
+}
+
+static void listing_free(struct listing *l) {
+        while (l->count)
+                free(l->names[--l->count]);
+        free(l->names);
+        l->names = (void*)0;
+}
+
+static int scan(const char *path, struct listing *l) {
+        struct dirent *entry;
+        char **names = (void*)0;
+        size_t count = 0, cap = 0;
+        DIR *dir;
+
+        dir = opendir(path);
+        if (dir == (void*)0)
+                return -1;
 
         while ((entry = readdir(dir)) != NULL) {
                 if (entry->d_type != DT_DIR)
                         continue;
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+                        continue;
 
-                n = snprintf(buf + offset, sizeof buf - offset,
-                        "%s\n", entry->d_name);
-                if (n < 0 || (size_t)n >= sizeof buf - offset)
-                        break; // out of room
-                offset += (size_t)n;
+                if (count == cap) {
+                        size_t ncap = cap ? cap * 2 : 32;
+                        char **tmp = realloc(names, ncap * sizeof *tmp);
+
+if (tmp == (void*)0)
+goto fail; // im going to figure this out
+                        names = tmp;
+                        cap = ncap;
+                }
+
+                names[count] = strdup(entry->d_name);
+                if (names[count] == (void*)0)
+                        goto fail;
+                count++;
         }
 
-        // dir! brilliant
+        closedir(dir);
+        qsort(names, count, sizeof *names, cmp_name);
 
-        emit(buf, offset);
+        l->names = names;
+        l->count = count;
+        return 0;
+
+fail:
+        closedir(dir);
+        while (count)
+                free(names[--count]);
+        free(names);
+        return -1;
+}
+
+static void draw(const struct listing *l, size_t sel, const char *cwd) {
+        char line[NAME_MAX + 4];
+        size_t i;
+        int n;
+
+        EMIT(CLEAR);
+        emit(cwd, strlen(cwd));
+        EMIT("\n");
+
+        for (i = 0; i < l->count; i++) {
+                n = snprintf(line, sizeof line, "%s%s\n",
+                        i == sel ? "> " : "  ", l->names[i]);
+                if (n <= 0)
+                        continue;
+                emit(line, (size_t)n < sizeof line ? (size_t)n : sizeof line - 1);
+        }
 }
 
 int main(void) {
@@ -214,22 +272,22 @@ int main(void) {
 
         int last = KEY_NONE;
 
+        struct listing list = { (void*)0, 0 };
+        size_t sel = 0;
+
         char cwd[PATH_MAX];
         if (getcwd(cwd, sizeof(cwd)) == NULL) {
+                perror("icd: unable to determine the current directory");
+                running = 0;
+                status = 1;
+        } else if (scan(cwd, &list) < 0) {
+                perror("icd: unable to open directory");
                 running = 0;
                 status = 1;
         }
 
         while (running) {
-                DIR *dir = opendir(cwd);
-                if (dir == NULL) {
-                        perror("icd: unable to open directory");
-                        status = 1;
-                        break;
-                }
-
-                draw(dir);
-                closedir(dir);
+                draw(&list, sel, cwd);
 
                 int k = key_read();
                 if (!running)
@@ -245,16 +303,18 @@ int main(void) {
                         /* TODO: exit and drop into selected dir */
                         break;
                 case KEY_UP:
-                        /* TODO: move the selection up */
+                        if (sel > 0)
+                                sel--;
                         break;
                 case KEY_DOWN:
-                        /* TODO: move the selection down */
+                        if (sel + 1 < list.count)
+                                sel++;
                         break;
                 case KEY_LEFT:
-                        /* TODO: go to the parent dir */
+                        /* TODO: go to the parent dir, rescan cwd, sel = 0 */
                         break;
                 case KEY_RIGHT:
-                        /* TODO: go into the selected dir */
+                        /* TODO: go into the selected dir, rescan cwd, sel = 0 */
                         break;
                 case KEY_NONE:
                         break;
@@ -263,6 +323,8 @@ int main(void) {
                 last = k;
 
         }
+
+        listing_free(&list);
 
         term_restore();
 
