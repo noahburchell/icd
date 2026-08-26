@@ -200,8 +200,8 @@ static int scan(const char *path, struct listing *l) {
                         size_t ncap = cap ? cap * 2 : 32;
                         char **tmp = realloc(names, ncap * sizeof *tmp);
 
-if (tmp == (void*)0)
-goto fail; // im going to figure this out
+                        if (tmp == (void*)0)
+                                goto fail; // im going to figure this out
                         names = tmp;
                         cap = ncap;
                 }
@@ -288,7 +288,7 @@ int main(void) {
 
         while (running) {
                 draw(&list, sel, cwd);
-
+                char *slash = strrchr(cwd, '/');
                 int k = key_read();
                 if (!running)
                         break;
@@ -311,7 +311,11 @@ int main(void) {
                                 sel++;
                         break;
                 case KEY_LEFT:
-                        /* TODO: go to the parent dir, rescan cwd, sel = 0 */
+                        if (slash)
+                                *slash = '\0';
+                        sel = 0;
+                        scan(cwd, &list);
+                        // list.names[sel];
                         break;
                 case KEY_RIGHT:
                         /* TODO: go into the selected dir, rescan cwd, sel = 0 */
